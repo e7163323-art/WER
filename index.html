@@ -16,7 +16,7 @@
 <body>
 <h1>שליפת מפתחות Gemini</h1>
 <label>OAuth Client ID (מ-Google Cloud Console):</label>
-<input id="cid" placeholder="xxxx.apps.googleusercontent.com">
+<input id="cid" value="302681980822-g6urqmoau0agfn19gse0kpfgceoq7osp.apps.googleusercontent.com" placeholder="xxxx.apps.googleusercontent.com">
 <button id="login">התחבר עם Google ושלוף 10 מפתחות</button>
 <button id="dl">הורד קובץ מפתחות</button>
 <pre id="log">ממתין…</pre>
@@ -28,7 +28,6 @@ const $ = id => document.getElementById(id);
 const log = t => { $('log').textContent += '\n' + t; };
 let token = null, keys = [];
 
-try { $('cid').value = localStorage.getItem('cid') || ''; } catch(e){}
 
 $('login').onclick = () => {
   const cid = $('cid').value.trim();
