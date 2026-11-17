@@ -17,6 +17,7 @@
 <h1>שליפת מפתחות Gemini</h1>
 <label>OAuth Client ID (מ-Google Cloud Console):</label>
 <input id="cid" value="302681980822-g6urqmoau0agfn19gse0kpfgceoq7osp.apps.googleusercontent.com" placeholder="xxxx.apps.googleusercontent.com">
+<label style="display:block;margin-top:8px"><input type="checkbox" id="create" checked style="width:auto"> צור מפתח חדש בפרויקטים שאין בהם</label>
 <button id="login">התחבר עם Google ושלוף 10 מפתחות</button>
 <button id="dl">הורד קובץ מפתחות</button>
 <pre id="log">ממתין…</pre>
@@ -44,10 +45,36 @@ $('login').onclick = () => {
   }).requestAccessToken();
 };
 
-async function api(url) {
-  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+async function api(url, body) {
+  const opt = { headers: { Authorization: 'Bearer ' + token } };
+  if (body !== undefined) {
+    opt.method = 'POST';
+    opt.headers['Content-Type'] = 'application/json';
+    opt.body = JSON.stringify(body);
+  }
+  const r = await fetch(url, opt);
   if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 200));
   return r.json();
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function createKey(projectId) {
+  // הפעלת Gemini API בפרויקט (אם כבר מופעל, לא קורה כלום)
+  try {
+    await api(`https://serviceusage.googleapis.com/v1/projects/${projectId}/services/generativelanguage.googleapis.com:enable`, {});
+  } catch (e) { log(`  (הפעלת Gemini API: ${e.message.slice(0, 80)})`); }
+  let op = await api(`https://apikeys.googleapis.com/v2/projects/${projectId}/locations/global/keys`, {
+    displayName: 'Gemini key',
+    restrictions: { apiTargets: [{ service: 'generativelanguage.googleapis.com' }] }
+  });
+  for (let i = 0; i < 20 && !op.done; i++) {
+    await sleep(1500);
+    op = await api('https://apikeys.googleapis.com/v2/' + op.name);
+  }
+  if (!op.done) throw new Error('יצירת המפתח לא הסתיימה בזמן');
+  if (op.error) throw new Error(op.error.message);
+  return op.response.keyString;
 }
 
 async function listProjects() {
@@ -76,10 +103,15 @@ async function run() {
     try {
       const d = await api(`https://apikeys.googleapis.com/v2/projects/${p.projectId}/locations/global/keys`);
       const k = (d.keys || []).find(isGemini);
-      if (!k) { log(`- ${p.projectId}: אין מפתח מתאים`); continue; }
-      const s = await api(`https://apikeys.googleapis.com/v2/${k.name}/keyString`);
-      keys.push({ project: p.projectId, key: s.keyString });
-      log(`✔ ${p.projectId}: ${s.keyString.slice(0, 8)}…`);
+      let keyString;
+      if (k) {
+        keyString = (await api(`https://apikeys.googleapis.com/v2/${k.name}/keyString`)).keyString;
+        log(`✔ ${p.projectId}: ${keyString.slice(0, 8)}… (קיים)`);
+      } else if ($('create').checked) {
+        keyString = await createKey(p.projectId);
+        log(`✔ ${p.projectId}: ${keyString.slice(0, 8)}… (נוצר חדש)`);
+      } else { log(`- ${p.projectId}: אין מפתח מתאים`); continue; }
+      keys.push({ project: p.projectId, key: keyString });
     } catch (e) {
       log(`- ${p.projectId}: ${e.message.slice(0, 120)}`);
     }
