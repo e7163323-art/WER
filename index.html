@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>שליפת מפתחות Gemini</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  body{font-family:system-ui,Arial,sans-serif;max-width:640px;margin:32px auto;padding:0 16px;line-height:1.6}
+  input{width:100%;padding:8px;box-sizing:border-box;direction:ltr}
+  button{padding:10px 18px;margin:8px 0;font-size:16px;cursor:pointer}
+  pre{background:#f3f3f3;padding:12px;border-radius:6px;direction:ltr;white-space:pre-wrap;max-height:300px;overflow:auto}
+  #dl{display:none}
+</style>
+</head>
+<body>
+<h1>שליפת מפתחות Gemini</h1>
+<label>OAuth Client ID (מ-Google Cloud Console):</label>
+<input id="cid" placeholder="xxxx.apps.googleusercontent.com">
+<button id="login">התחבר עם Google ושלוף 10 מפתחות</button>
+<button id="dl">הורד קובץ מפתחות</button>
+<pre id="log">ממתין…</pre>
+
+<script>
+const MAX = 10;
+const SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+const $ = id => document.getElementById(id);
+const log = t => { $('log').textContent += '\n' + t; };
+let token = null, keys = [];
+
+try { $('cid').value = localStorage.getItem('cid') || ''; } catch(e){}
+
+$('login').onclick = () => {
+  const cid = $('cid').value.trim();
+  if (!cid) return alert('הכנס Client ID');
+  try { localStorage.setItem('cid', cid); } catch(e){}
+  google.accounts.oauth2.initTokenClient({
+    client_id: cid,
+    scope: SCOPE,
+    callback: r => {
+      if (r.error) return log('שגיאת התחברות: ' + r.error);
+      token = r.access_token;
+      run().catch(e => log('שגיאה: ' + e.message));
+    }
+  }).requestAccessToken();
+};
+
+async function api(url) {
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 200));
+  return r.json();
+}
+
+async function listProjects() {
+  let out = [], pageToken = '';
+  do {
+    const d = await api('https://cloudresourcemanager.googleapis.com/v1/projects?filter=lifecycleState:ACTIVE' +
+      (pageToken ? '&pageToken=' + pageToken : ''));
+    out = out.concat(d.projects || []);
+    pageToken = d.nextPageToken;
+  } while (pageToken);
+  return out;
+}
+
+function isGemini(k) {
+  const t = k.restrictions && k.restrictions.apiTargets;
+  return !t || t.some(x => x.service === 'generativelanguage.googleapis.com');
+}
+
+async function run() {
+  $('log').textContent = 'שולף פרויקטים…';
+  keys = [];
+  const projects = await listProjects();
+  log('נמצאו ' + projects.length + ' פרויקטים');
+  for (const p of projects) {
+    if (keys.length >= MAX) break;
+    try {
+      const d = await api(`https://apikeys.googleapis.com/v2/projects/${p.projectId}/locations/global/keys`);
+      const k = (d.keys || []).find(isGemini);
+      if (!k) { log(`- ${p.projectId}: אין מפתח מתאים`); continue; }
+      const s = await api(`https://apikeys.googleapis.com/v2/${k.name}/keyString`);
+      keys.push({ project: p.projectId, key: s.keyString });
+      log(`✔ ${p.projectId}: ${s.keyString.slice(0, 8)}…`);
+    } catch (e) {
+      log(`- ${p.projectId}: ${e.message.slice(0, 120)}`);
+    }
+  }
+  log(`\nסה"כ ${keys.length} מפתחות`);
+  if (keys.length) $('dl').style.display = 'inline-block';
+}
+
+$('dl').onclick = () => {
+  const txt = keys.map(k => `${k.project}\t${k.key}`).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
+  a.download = 'gemini-keys.txt';
+  a.click();
+};
+</script>
+</body>
+</html>
