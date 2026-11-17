@@ -78,14 +78,28 @@ async function createKey(projectId) {
 }
 
 async function listProjects() {
-  let out = [], pageToken = '';
-  do {
-    const d = await api('https://cloudresourcemanager.googleapis.com/v1/projects?filter=lifecycleState:ACTIVE' +
-      (pageToken ? '&pageToken=' + pageToken : ''));
-    out = out.concat(d.projects || []);
-    pageToken = d.nextPageToken;
-  } while (pageToken);
-  return out;
+  const seen = new Map();
+  // חיפוש גרסה 3
+  try {
+    let pageToken = '';
+    do {
+      const d = await api('https://cloudresourcemanager.googleapis.com/v3/projects:search?query=state:ACTIVE' +
+        (pageToken ? '&pageToken=' + pageToken : ''));
+      (d.projects || []).forEach(p => seen.set(p.projectId, p));
+      pageToken = d.nextPageToken;
+    } while (pageToken);
+  } catch (e) { log('(חיפוש v3: ' + e.message.slice(0, 100) + ')'); }
+  // רשימה גרסה 1
+  try {
+    let pageToken = '';
+    do {
+      const d = await api('https://cloudresourcemanager.googleapis.com/v1/projects?filter=lifecycleState:ACTIVE' +
+        (pageToken ? '&pageToken=' + pageToken : ''));
+      (d.projects || []).forEach(p => seen.set(p.projectId, p));
+      pageToken = d.nextPageToken;
+    } while (pageToken);
+  } catch (e) { log('(רשימה v1: ' + e.message.slice(0, 100) + ')'); }
+  return [...seen.values()];
 }
 
 function isGemini(k) {
@@ -98,6 +112,7 @@ async function run() {
   keys = [];
   const projects = await listProjects();
   log('נמצאו ' + projects.length + ' פרויקטים');
+  if (!projects.length) log('לא נמצאו פרויקטים בחשבון הזה. צריך ליצור פרויקט ב-console.cloud.google.com או ב-aistudio.google.com ולנסות שוב.');
   for (const p of projects) {
     if (keys.length >= MAX) break;
     try {
